@@ -1,0 +1,7 @@
+---
+# Окружение test — локальный docker-стенд (gitlab-ci-local / docker на хосте).
+# Значение rtpengine_control_ip по умолчанию (127.0.0.1) на macOS не работает:
+# Docker Desktop проксирует loopback каждого host-контейнера отдельно, и ответ
+# rtpengine не доходит до opensips. Поэтому control ходит через адрес внутренней
+# стороны SBC (gateway bridge-сети sipssert).
+rtpengine_control_ip: 192.168.51.1

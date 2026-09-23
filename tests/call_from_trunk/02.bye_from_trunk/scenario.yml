@@ -1,0 +1,30 @@
+---
+# Исходящий звонок (АТС -> транк), но BYE инициирует внешняя сторона.
+# Проверяет внутридиалоговый relay из внешней сети: BYE от транка проходит
+# через loose_route на gateway и доставляется АТС.
+timeout: 30
+
+tasks:
+  - name: rtpengine
+    type: rtpengine_service
+  - name: opensips
+    type: opensips
+    config_file: opensips.cfg
+    require:
+      started:
+        task: rtpengine
+        wait: 2
+  - name: uac
+    type: sipp_internal_pbx
+    config_file: oinvite-i200-recvbye.xml
+    require:
+      started:
+        task: opensips
+        wait: 2
+  - name: uas
+    type: sipp_external_trunk
+    config_file: iinvite-o200-bye_from_uas.xml
+    require:
+      started:
+        task: opensips
+        wait: 2

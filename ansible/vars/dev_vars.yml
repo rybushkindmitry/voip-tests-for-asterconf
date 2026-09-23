@@ -1,0 +1,8 @@
+---
+# Окружение dev — dev-стенд на выделенной Linux-ноде.
+# rtpengine_control_ip наследуется из ansible/group_vars/all.yml (127.0.0.1):
+# на Linux loopback работает как в проде.
+deploy_dir: /opt/voip-test-dev   # отдельный каталог деплоя на ноде
+sipp_ports:                      # свои медиа-порты SIPp — нет пересечений,
+  media_port_uac: 32300          # если два стенда делят один раннер
+  media_port_uas: 32400

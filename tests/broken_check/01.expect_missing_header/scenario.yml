@@ -1,0 +1,31 @@
+---
+# Заведомо падающий тест: демонстрация красного pipeline и JUnit-отчёта.
+# Включён по умолчанию; исключается переменной SKIP_KNOWN_FAILING=enable.
+timeout: 20
+
+tasks:
+  - name: rtpengine
+    type: rtpengine_service
+  - name: opensips
+    type: opensips
+    config_file: opensips.cfg
+    require:
+      started:
+        task: rtpengine
+        wait: 2
+  - name: uac
+    type: sipp_internal_pbx
+    config_file: oinvite-i200-missing_header.xml
+    require:
+      started:
+        task: opensips
+        wait: 2
+  # Транк-ответчик обязателен: звонок должен дойти до 200 OK,
+  # чтобы падало именно отсутствие X-Media-Info (ereg), а не «нет ответа».
+  - name: uas
+    type: sipp_external_trunk
+    config_file: iinvite-o200-obye.xml
+    require:
+      started:
+        task: opensips
+        wait: 2

@@ -1,0 +1,18 @@
+---
+# Значения тестового окружения sipssert (образы, медиа-порты SIPp).
+# Адреса SBC, сети и эндпоинты — общие с деплоем SUT, лежат в
+# ansible/group_vars/all.yml: рендер конфигов и тесты читают одни и те же значения.
+# В проде: тестово-специфичные значения приходят из env per-environment
+# и из dig-lookup'ов VIP-адресов.
+sipssert_image: opensips/sipssert:latest
+sipp_ports:
+  media_port_uac: 32100
+  media_port_uas: 32200
+demo_images:
+  # SUT: opensips:3.6 + TLS-модули (см. docker/opensips-tls/); make opensips-tls-image —
+  # локальная сборка, в Hub — multi-arch drybushkin/voip-tests-opensips-tls:3.6
+  opensips: drybushkin/voip-tests-opensips-tls:3.6
+  sipp: drybushkin/voip-tests-sipp:3.7.7
+  rtpengine: jambonz/rtpengine:14.1.1.8-jambonz13
+  # pjsua-test (TLS/SRTP-эндпоинты): github.com/rybushkindmitry/pjsua-for-sipssert
+  pjsua: drybushkin/pjsua-for-sipssert:latest

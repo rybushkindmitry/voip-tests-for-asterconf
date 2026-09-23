@@ -1,0 +1,28 @@
+# Демо-pipeline: стадия тестирования + заглушка стадии деплоя.
+# В проде: stages: [build, test, deploy], include приватных шаблонов ci-templates/common,
+# переменные окружений и PASS-коды — как принято в production-версии pipeline.
+variables:
+  # Выбор окружения — только для ручной стадии deploy (куда уезжаем дальше).
+  # Тестовый стенд тут не вариант: тестовая джоба ВСЕГДА выполняется на тесте
+  # (она и есть «деплой на тест + прогон sipssert»), отдельного деплоя на тест нет.
+  ENV:
+    value: dev
+    options:
+      - dev
+      - stage
+      - prod
+    description: 'Целевое окружение для стадии deploy: инвентарь ansible/inventories/$ENV'
+  SKIP_KNOWN_FAILING:
+    value: disable
+    options:
+      - enable
+      - disable
+    description: 'Исключить заведомо падающий тест broken_check'
+
+include:
+  - local: 'gitlab-ci/test.yml'
+  - local: 'gitlab-ci/deploy.yml'
+
+stages:
+  - test
+  - deploy

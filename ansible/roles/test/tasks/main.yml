@@ -1,0 +1,167 @@
+---
+# Роль test: подготовка тестового окружения и запуск sipssert.
+# Упрощённая копия production-версии этой роли:
+# сохранены шаги filetree-раскладки, генерации defines/run.yml, раскладки
+# конфигов SUT по юнит-тестам, запуска и забора report.xml и логов прогона.
+- name: Каталог тестов
+  ansible.builtin.file:
+    path: "{{ deploy_dir }}/tests"
+    state: directory
+    mode: "0755"
+
+- name: Раскладка каталогов тестов
+  ansible.builtin.file:
+    path: "{{ deploy_dir }}/tests/{{ item.path }}"
+    state: directory
+    mode: "0755"
+  with_filetree: "{{ ci_project_dir }}/tests/"
+  when: item.state == 'directory'
+
+- name: Рендеринг j2-файлов из tests/ (если появятся)
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ deploy_dir }}/tests/{{ item.path | regex_replace('\\.j2$', '') }}"
+  with_filetree: "{{ ci_project_dir }}/tests/"
+  when:
+    - item.state == 'file'
+    - item.path is search('\.j2$')
+
+- name: Копирование статичных файлов тестов
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ deploy_dir }}/tests/{{ item.path }}"
+    mode: "0644"
+  with_filetree: "{{ ci_project_dir }}/tests/"
+  when:
+    - item.state == 'file'
+    - item.path is not search('\.j2$')
+
+- name: Копирование демо-сертификатов TLS (для volumes таска opensips/pjsua)
+  # Источник — файлы репозитория (ansible читает их внутри джобы), приёмник —
+  # deploy_dir: это хостовый путь (HOST_WORKSPACE/build локально, /opt/voip-test
+  # в проде), иначе вложенный docker не смонтирует volume (в gcl/GitLab
+  # CI_PROJECT_DIR — это /builds, невидимый docker-демону)
+  ansible.builtin.copy:
+    src: "{{ ci_project_dir }}/ansible/files/tls/"
+    dest: "{{ deploy_dir }}/tls/"
+    mode: "0644"
+
+- name: Поиск наборов тестов (кроме logs прошлых прогонов)
+  ansible.builtin.find:
+    paths: "{{ deploy_dir }}/tests"
+    file_type: directory
+    recurse: false
+    excludes: "logs"
+  register: found_tests_set_dirs
+
+- name: Список наборов
+  ansible.builtin.set_fact:
+    tests_set: "{{ found_tests_set_dirs.files | map(attribute='path') | list }}"
+
+- name: Поиск юнит-тестов в наборах
+  ansible.builtin.find:
+    paths: "{{ item }}"
+    file_type: directory
+    recurse: false
+  loop: "{{ tests_set }}"
+  register: found_dirs
+
+- name: Единый список юнит-тестов
+  ansible.builtin.set_fact:
+    unit_tests: "{{ found_dirs.results | map(attribute='files') | flatten | map(attribute='path') | list }}"
+
+- name: Генерация defines.yml
+  ansible.builtin.template:
+    src: defines.yml.j2
+    dest: "{{ deploy_dir }}/tests/defines.yml"
+    mode: "0644"
+
+- name: Генерация run.yml
+  ansible.builtin.template:
+    src: run.yml.j2
+    dest: "{{ deploy_dir }}/tests/run.yml"
+    mode: "0644"
+
+- name: Рендеринг config.yml по наборам
+  ansible.builtin.template:
+    src: config.yml.j2
+    dest: "{{ item }}/config.yml"
+    mode: "0644"
+  loop: "{{ tests_set }}"
+
+- name: Раскладка opensips.cfg по юнит-тестам
+  ansible.builtin.copy:
+    src: "{{ deploy_dir }}/opensips.cfg"
+    dest: "{{ item }}/opensips.cfg"
+    mode: "0644"
+  loop: "{{ unit_tests }}"
+
+- name: Раскладка rtpengine.conf по юнит-тестам
+  ansible.builtin.copy:
+    src: "{{ deploy_dir }}/rtpengine.conf"
+    dest: "{{ item }}/rtpengine.conf"
+    mode: "0644"
+  loop: "{{ unit_tests }}"
+
+# Sipssert сам создаёт symlink logs/latest и падает, если он уже есть
+# (повторный прогон по тому же deploy_dir).
+- name: Удаление старого symlink logs/latest
+  ansible.builtin.file:
+    path: "{{ deploy_dir }}/tests/logs/latest"
+    state: absent
+
+# В проде: перед этим шагом — docker login в приватный registry,
+# создание volume с TLS-сертификатами из Vault и т.п.
+# Same-path mount обязателен: демон docker видит пути хоста.
+- name: Запуск sipssert
+  ansible.builtin.command:
+    cmd: >-
+      docker run --rm
+      -v /var/run/docker.sock:/var/run/docker.sock
+      -v {{ deploy_dir }}/tests:{{ deploy_dir }}/tests
+      -w {{ deploy_dir }}/tests
+      {{ sipssert_image }} --junit-xml
+  register: sipssert_result
+  ignore_errors: true
+
+- name: Лог sipssert
+  ansible.builtin.debug:
+    msg: "{{ sipssert_result.stdout_lines | default([]) | last | default('') }}"
+
+# Логи прогона (opensips/rtpengine/sipp *.log, *.status, capture.pcap) — в
+# артефакт, чтобы красный pipeline диагностировался из UI GitLab без хождения
+# на машину. tar -h разыменовывает symlink latest: в архив попадает каталог
+# прогона, а не ссылка. Упаковка — ДО строгого забора report.xml и до fail:
+# диагностический артефакт должен пережить любое падение плейбука.
+# Best-effort: если sipssert упал до создания логов, задачи не роняют плей —
+# проверка результата остаётся на report.xml и задаче fail ниже.
+- name: Упаковка логов прогона
+  ansible.builtin.command:
+    cmd: >-
+      tar -czf {{ deploy_dir }}/tests/logs/sipssert-logs.tar.gz
+      -h -C {{ deploy_dir }}/tests/logs latest
+  changed_when: true
+  failed_when: false
+
+- name: Забор логов прогона как артефакта
+  ansible.builtin.fetch:
+    src: "{{ deploy_dir }}/tests/logs/sipssert-logs.tar.gz"
+    dest: "{{ ci_project_dir }}/sipssert-logs.tar.gz"
+    flat: true
+  failed_when: false
+
+# Забор отчёта как в проде: ansible.builtin.fetch забирает файл с управляемой
+# ноды на контроллер (раннер). При connection: local это вырожденное копирование,
+# но при переходе на удалённую ноду роль менять не нужно — только inventory.
+# flat: true — положить файл ровно в dest, без обёртки dest/<hostname>/<путь>/.
+# Строгий (без failed_when: false): нет report.xml — реальная проблема, плей падает.
+- name: Забор report.xml как артефакта
+  ansible.builtin.fetch:
+    src: "{{ deploy_dir }}/tests/logs/latest/report.xml"
+    dest: "{{ ci_project_dir }}/report.xml"
+    flat: true
+
+- name: Падение pipeline при упавших тестах
+  ansible.builtin.fail:
+    msg: "Tests failed! Смотри report.xml"
+  when: sipssert_result is failed

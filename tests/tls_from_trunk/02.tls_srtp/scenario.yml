@@ -1,0 +1,28 @@
+---
+# Как 01.tls_sip, но с обязательным SDES-SRTP на внешнем плече:
+# pjsua (SRTP mandatory) -> SBC: rtpengine терминирует SRTP, внутрь идёт
+# RTP, эхо возвращается и снова шифруется. pjsua сверяет паттерн.
+timeout: 60
+
+tasks:
+  - name: rtpengine
+    type: rtpengine_service
+  - name: opensips
+    type: opensips
+    config_file: opensips.cfg
+    require:
+      started:
+        task: rtpengine
+        wait: 2
+  - name: uas
+    type: sipp_uas_pbx_rtp_echo
+    require:
+      started:
+        task: opensips
+        wait: 2
+  - name: uac
+    type: pjsua_trunk_tls_srtp
+    require:
+      started:
+        task: opensips
+        wait: 2

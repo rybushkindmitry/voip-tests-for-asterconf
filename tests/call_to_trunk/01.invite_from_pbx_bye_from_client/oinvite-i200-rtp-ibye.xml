@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<!-- UAC с RTP check: INVITE -> 200 -> ACK -> RTP-паттерн 0xAA (PCMA) 2с -> BYE.
+     SIPp 3.7+ сам проверяет, что отправленные пакеты вернулись теми же
+     (эхо от UAS через rtpengine): >=1 пакет — успех (exit 0), иначе exit 253.
+     Синтаксис: rtpcheck_xml_syntax_reference.pdf -->
+<scenario name="oinvite-i200-rtp-ibye">
+
+  <send retrans="500" start_txn="invite">
+    <![CDATA[
+      INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: sip:[tel]@[local_ip]:[local_port];tag=[pid]SIPpTag00[call_number]
+      To: sip:[service]@[remote_ip]:[remote_port]
+      Call-ID: [call_id]
+      CSeq: [cseq] INVITE
+      Contact: sip:[service]@[local_ip]:[local_port]
+      X-gwid: [gwid]
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=user1 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 8
+      a=rtpmap:8 PCMA/8000
+
+    ]]>
+  </send>
+
+  <recv response="100" optional="true" response_txn="invite"/>
+
+  <recv response="180" optional="true" response_txn="invite"/>
+
+  <recv response="200" rrs="true" response_txn="invite"/>
+
+  <send ack_txn="invite">
+    <![CDATA[
+      ACK [next_url] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      Route: <sip:[remote_ip]:[remote_port];lr>
+      From: sip:[tel]@[local_ip]:[local_port];tag=[pid]SIPpTag00[call_number]
+      To: sip:[service]@[remote_ip]:[remote_port][peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: [cseq] ACK
+      Contact: sip:[service]@[local_ip]:[local_port]
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <nop>
+    <action>
+      <exec rtp_stream="apattern,1,8,PCMA/8000"/>
+    </action>
+  </nop>
+
+  <pause milliseconds="2000"/>
+
+  <send retrans="500" start_txn="bye">
+    <![CDATA[
+      BYE [next_url] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      Route: <sip:[remote_ip]:[remote_port];lr>
+      From: sip:[tel]@[local_ip]:[local_port];tag=[pid]SIPpTag00[call_number]
+      To: sip:[service]@[remote_ip]:[remote_port][peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: [cseq] BYE
+      Contact: sip:[service]@[local_ip]:[local_port]
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv response="200" response_txn="bye"/>
+
+</scenario>

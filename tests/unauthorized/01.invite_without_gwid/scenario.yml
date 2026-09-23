@@ -1,0 +1,22 @@
+---
+# Негатив: источник не из списка доверенных -> 403 Forbidden.
+# Аналог продового tests/udp_call_to_trunk/01.unauthorized.
+timeout: 20
+
+tasks:
+  - name: rtpengine
+    type: rtpengine_service
+  - name: opensips
+    type: opensips
+    config_file: opensips.cfg
+    require:
+      started:
+        task: rtpengine
+        wait: 2
+  - name: hacker
+    type: sipp_internal_hacker
+    config_file: oinvite-i403.xml
+    require:
+      started:
+        task: opensips
+        wait: 2

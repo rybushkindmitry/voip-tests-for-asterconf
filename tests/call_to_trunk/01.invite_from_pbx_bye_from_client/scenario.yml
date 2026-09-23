@@ -1,0 +1,30 @@
+---
+# Happy path: INVITE с X-gwid от АТС проходит через gateway на транк.
+# Медиа-проверка: UAC шлёт битовый паттерн 0xAA (PCMA), rtpengine ретранслирует,
+# UAS эхо-отражает, UAC сверяет (exit 0 = медиа ходит, 253 = потеряно).
+# BYE инициирует АТС.
+timeout: 30
+
+tasks:
+  - name: rtpengine
+    type: rtpengine_service
+  - name: opensips
+    type: opensips
+    config_file: opensips.cfg
+    require:
+      started:
+        task: rtpengine
+        wait: 2
+  # UAC стартует ПОСЛЕ UAS (прод-паттерн): исключает гонку старта
+  - name: uac
+    type: sipp_uac_pbx_rtp
+    require:
+      started:
+        task: uas
+        wait: 1
+  - name: uas
+    type: sipp_uas_trunk_rtp
+    require:
+      started:
+        task: opensips
+        wait: 2

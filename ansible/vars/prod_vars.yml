@@ -1,0 +1,8 @@
+---
+# Окружение prod — тестовый прогон против production-подобной ноды
+# (в production-репозитории этот джоба идёт последней, после подтверждения).
+# rtpengine_control_ip наследуется из ansible/group_vars/all.yml (127.0.0.1).
+deploy_dir: /opt/voip-test
+sipp_ports:
+  media_port_uac: 32700
+  media_port_uas: 32800

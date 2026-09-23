@@ -1,0 +1,37 @@
+# Ручная джоба-заглушка стадии deploy: в UI GitLab выглядит как кнопка.
+# Гейт: needs: [test] — кнопка появляется только после зелёного test
+# (test = деплой на тестовое окружение + прогон sipssert), т.е. на prod
+# не уедет код, не прошедший тесты. Сам деплой в демо выполняется раньше —
+# ролью gateway на стадии test (конфиги SUT выкладываются перед прогоном тестов).
+#
+# В проде деплой на каждую ноду — отдельная ручная джоба-«кнопка»,
+# сцепленная в цепочку: вторая кнопка появляется только после первой —
+# между нодами пауза ручной проверки (мониторинг/трафик), «стоп в середине»
+# = не нажать следующую кнопку, вторая нода остаётся на рабочем конфиге:
+#   deploy:sbc-prod-01:
+#     stage: deploy
+#     needs: [test]                       # гейт: только после зелёного test
+#     when: manual                        # кнопка 1 в UI GitLab
+#     environment:
+#       name: prod
+#     allow_failure: false                # пайплайн ждёт нажатия (status: blocked)
+#     script:
+#       - ansible-playbook -i inventories/prod/inventory.ini --limit sbc-prod-01 ansible/deploy.yml
+#   deploy:sbc-prod-02:
+#     needs: [deploy:sbc-prod-01]         # кнопка 2 — только после кнопки 1
+#     when: manual
+#     script:
+#       - ansible-playbook -i inventories/prod/inventory.ini --limit sbc-prod-02 ansible/deploy.yml
+# Джобы под ноды объявляются явно (или генерируются child-pipeline'ом из inventory);
+# на ноду — только через playbook, никакой ручной правки конфигов.
+deploy:
+  stage: deploy
+  needs: [test]
+  image: drybushkin/voip-tests-ci:latest
+  when: manual
+  environment:
+    name: $ENV
+  script:
+    - echo "Заглушка стадии deploy (демо). SUT уже выложен ролью gateway на стадии test."
+    - echo "В проде здесь — деплой на одну ноду по кнопке, например:"
+    - echo "  ansible-playbook -i inventories/$ENV/inventory.ini --limit <node> ansible/deploy.yml"

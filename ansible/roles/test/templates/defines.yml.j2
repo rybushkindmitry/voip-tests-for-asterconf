@@ -1,0 +1,40 @@
+---
+# Переменные для sipssert. Этот файл разворачивает ansible (значения из
+# defaults роли), а jinja-выражения в сценариях и config.yml наборов потом
+# разворачивает сам sipssert, используя эти переменные.
+# ВНИМАНИЕ: нельзя писать двойные фигурные скобки даже в комментариях —
+# jinja2 (ansible и sipssert) парсит файл целиком и упадёт на невалидном
+# выражении.
+internal_net:
+  subnet: {{ demo_networks.internal_net.subnet }}
+  gateway: {{ demo_networks.internal_net.gateway }}
+external_net:
+  subnet: {{ demo_networks.external_net.subnet }}
+  gateway: {{ demo_networks.external_net.gateway }}
+images:
+  opensips: {{ demo_images.opensips }}
+  sipp: {{ demo_images.sipp }}
+  rtpengine: {{ demo_images.rtpengine }}
+sbc:
+  internal_ip: {{ sbc.internal_ip }}
+  external_ip: {{ sbc.external_ip }}
+  internal_port: {{ sbc.internal_port }}
+  external_port: {{ sbc.external_port }}
+sipp:
+  media_port_uac: {{ sipp_ports.media_port_uac }}
+  media_port_uas: {{ sipp_ports.media_port_uas }}
+endpoints:
+  internal_pbx:
+    ip: {{ demo_endpoints.internal_pbx.ip }}
+    port: {{ demo_endpoints.internal_pbx.port }}
+    tel: "{{ demo_endpoints.internal_pbx.tel }}"
+    gwid: {{ demo_endpoints.internal_pbx.gwid }}
+  internal_hacker:
+    ip: {{ demo_endpoints.internal_hacker.ip }}
+    port: {{ demo_endpoints.internal_hacker.port }}
+    tel: "{{ demo_endpoints.internal_hacker.tel }}"
+  external_trunk:
+    ip: {{ demo_endpoints.external_trunk.ip }}
+    port: {{ demo_endpoints.external_trunk.port }}
+    service: "{{ demo_endpoints.external_trunk.service }}"
+    tel: "{{ demo_endpoints.external_trunk.tel }}"

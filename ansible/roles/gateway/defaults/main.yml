@@ -1,0 +1,4 @@
+---
+# Пути до jinja-шаблонов конфигов SUT (рендерятся в deploy_dir)
+gateway_opensips_template: "{{ ci_project_dir }}/opensips/opensips.cfg.j2"
+gateway_rtpengine_template: "{{ ci_project_dir }}/rtpengine/rtpengine.conf.j2"

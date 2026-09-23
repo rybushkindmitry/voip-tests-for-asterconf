@@ -1,0 +1,13 @@
+---
+# Проверка конфига: opensips -C. daemon: false — задача ждёт завершения процесса,
+# exit code 0 = тест зелёный. Аналог продового tests/startup/01.check_script.
+timeout: 20
+
+tasks:
+  - name: opensips
+    type: opensips
+    config_file: opensips.cfg
+    entrypoint:
+      - opensips
+      - -C
+    daemon: false

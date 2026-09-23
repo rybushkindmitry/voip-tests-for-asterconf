@@ -1,0 +1,30 @@
+---
+# Входящий звонок: внешний транк зовёт АТС через gateway, BYE инициирует АТС.
+# Медиа-проверка: UAC (транк) шлёт битовый паттерн 0xAA (PCMA), rtpengine
+# ретранслирует (direction=external,internal), АТС эхо-отражает, UAC сверяет
+# (exit 0 = медиа ходит, 253 = потеряно).
+timeout: 30
+
+tasks:
+  - name: rtpengine
+    type: rtpengine_service
+  - name: opensips
+    type: opensips
+    config_file: opensips.cfg
+    require:
+      started:
+        task: rtpengine
+        wait: 2
+  # UAC стартует ПОСЛЕ UAS (прод-паттерн): исключает гонку старта
+  - name: uac
+    type: sipp_uac_trunk_rtp
+    require:
+      started:
+        task: uas
+        wait: 1
+  - name: uas
+    type: sipp_uas_pbx_rtp_bye
+    require:
+      started:
+        task: opensips
+        wait: 2

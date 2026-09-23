@@ -1,0 +1,23 @@
+---
+# Роль gateway: «деплой» SUT — рендер конфигов opensips/rtpengine в deploy_dir.
+# Шаблоны лежат рядом с сервисом (opensips/*.j2, rtpengine/*.j2), значения —
+# общие с тестовым стендом, из ansible/group_vars/all.yml.
+# В проде: то же самое + drouting/LB, сертификаты из Vault и т.д.
+# (см. .ansible/roles/opensips_config и common).
+- name: Каталог деплоя
+  ansible.builtin.file:
+    path: "{{ deploy_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Рендер opensips.cfg
+  ansible.builtin.template:
+    src: "{{ gateway_opensips_template }}"
+    dest: "{{ deploy_dir }}/opensips.cfg"
+    mode: "0644"
+
+- name: Рендер rtpengine.conf
+  ansible.builtin.template:
+    src: "{{ gateway_rtpengine_template }}"
+    dest: "{{ deploy_dir }}/rtpengine.conf"
+    mode: "0644"

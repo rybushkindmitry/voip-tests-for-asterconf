@@ -1,0 +1,28 @@
+---
+# Входящий звонок от оператора по TLS (pjsua-test как TLS-client, то, что
+# SIPp не умеет в нужной нам комбинации ролей): UAC TLS -> SBC (TLS server)
+# -> АТС (UDP) c rtp_echo. pjsua валидирует эхо + наличие Record-Route.
+timeout: 60
+
+tasks:
+  - name: rtpengine
+    type: rtpengine_service
+  - name: opensips
+    type: opensips
+    config_file: opensips.cfg
+    require:
+      started:
+        task: rtpengine
+        wait: 2
+  - name: uas
+    type: sipp_uas_pbx_rtp_echo
+    require:
+      started:
+        task: opensips
+        wait: 2
+  - name: uac
+    type: pjsua_trunk_tls
+    require:
+      started:
+        task: opensips
+        wait: 2

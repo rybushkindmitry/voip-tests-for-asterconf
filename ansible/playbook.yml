@@ -1,0 +1,39 @@
+---
+# Демо-плейбук: деплой мини-gateway + подготовка и запуск тестов.
+# Окружение стенда выбирается переменной ENV (test/dev/stage/prod, по умолчанию
+# test) — подключается vars/<env>_vars.yml (см. pre_tasks ниже).
+# В проде: остальные переменные приходят из env CI (VAULT_*, REMOTE_SSH_*),
+# плейбук играется против удалённой ноды, см. production-версию плейбука.
+- name: Deploy gateway и прогон тестов
+  hosts: test_node
+  vars:
+    # Окружение стенда; по нему в pre_tasks подключается vars/<env>_vars.yml.
+    # В проде ENV задаётся джобой (environment-специфичные variables в .gitlab-ci.yml).
+    env_name: "{{ lookup('ansible.builtin.env', 'ENV') | default('test', true) }}"
+    # Хостовый путь репозитория (для монтирований вложенного docker через
+    # общий docker.sock). В gitlab-ci-local передаётся из Makefile:
+    #   gitlab-ci-local test --variable HOST_WORKSPACE=$(CURDIR) --volume $(CURDIR):$(CURDIR)
+    # В проде не нужен: DEPLOY_DIR задаёт путь прямо на ноде.
+    host_workspace: "{{ lookup('ansible.builtin.env', 'HOST_WORKSPACE') }}"
+    # Куда складывается деплой и тесты (в проде: /opt/voip-test на ноде).
+    # В gitlab-ci-local деплой обязан лежать на хостовом пути, иначе вложенный
+    # `docker run -v` (общий демон) не смонтирует gcl-овский /builds volume.
+    deploy_dir: "{{ lookup('ansible.builtin.env', 'DEPLOY_DIR') | default(((lookup('ansible.builtin.env', 'HOST_WORKSPACE')) if (lookup('ansible.builtin.env', 'HOST_WORKSPACE')) else (playbook_dir ~ '/..')) ~ '/build', true) }}"
+    # Откуда берутся исходники (в проде: CI_PROJECT_DIR)
+    ci_project_dir: "{{ lookup('ansible.builtin.env', 'CI_PROJECT_DIR') | default(playbook_dir ~ '/..', true) }}"
+    # Исключить заведомо падающий broken_check (демо красного pipeline)
+    skip_known_failing: "{{ lookup('ansible.builtin.env', 'SKIP_KNOWN_FAILING') == 'enable' }}"
+  pre_tasks:
+    - name: Проверка имени окружения
+      ansible.builtin.assert:
+        that: env_name in ['test', 'dev', 'stage', 'prod']
+        msg: "ENV={{ env_name }} недопустимо; ожидается test, dev, stage или prod (см. ansible/vars/)"
+
+    # include_vars имеет приоритет выше play vars и group_vars — окружение
+    # переопределяет базовые значения точечно, не повторяя весь файл.
+    - name: Подключение переменных окружения (vars/<env>_vars.yml)
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/{{ env_name }}_vars.yml"
+  roles:
+    - gateway
+    - test

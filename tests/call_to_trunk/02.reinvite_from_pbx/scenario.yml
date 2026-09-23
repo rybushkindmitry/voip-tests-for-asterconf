@@ -1,0 +1,30 @@
+---
+# Исходящий звонок с re-INVITE ОТ АТС: после установки АТС шлёт in-dialog
+# INVITE (через loose_route + rtpengine_manage на gateway), транк отвечает
+# новым ансером. RTP-паттерн стримится ПОСЛЕ re-INVITE — проверяем, что
+# медиа осталось заякоренным на rtpengine и ходит после пересогласования.
+timeout: 60
+
+tasks:
+  - name: rtpengine
+    type: rtpengine_service
+  - name: opensips
+    type: opensips
+    config_file: opensips.cfg
+    require:
+      started:
+        task: rtpengine
+        wait: 2
+  # UAC стартует ПОСЛЕ UAS (прод-паттерн): исключает гонку старта
+  - name: uac
+    type: sipp_uac_pbx_rtp_reinvite
+    require:
+      started:
+        task: uas
+        wait: 1
+  - name: uas
+    type: sipp_uas_trunk_rtp_reinvite
+    require:
+      started:
+        task: opensips
+        wait: 2

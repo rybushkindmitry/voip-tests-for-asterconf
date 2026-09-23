@@ -1,0 +1,6 @@
+build/
+logs/
+report.xml
+sipssert-logs.tar.gz
+.DS_Store
+.gitlab-ci-local/

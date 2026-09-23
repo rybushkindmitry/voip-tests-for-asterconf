@@ -1,0 +1,125 @@
+####### Мини-gateway для демо (SUT) #######
+# Jinja-шаблон: рендерится ansible'ом (роль gateway) из значений
+# ansible/group_vars/all.yml при деплое в deploy_dir.
+# Один IP с rtpengine (host-режим sipssert):
+#   {{ sbc.internal_ip }} — «внутренняя» сторона (gateway сети internal_net)
+#   {{ sbc.external_ip }} — «внешняя» сторона (gateway сети external_net)
+# В проде: адреса приходят из VIP ноды, модулей и маршрутов сильно больше,
+# схема рендера — та же (template в роли деплоя).
+
+####### Globals ########
+# Синтаксис OpenSIPS 3.6: udp_workers вместо children, stderror_enabled вместо log_stderror,
+# socket вместо listen (см. штатный конфиг образа opensips/opensips:3.6).
+log_level=3
+stderror_enabled=yes
+syslog_enabled=no
+auto_aliases=no
+udp_workers=2
+
+socket=udp:{{ sbc.internal_ip }}:{{ sbc.internal_port }}
+socket=udp:{{ sbc.external_ip }}:{{ sbc.external_port }}
+socket=tls:{{ sbc.external_ip }}:{{ sbc.tls_port }}
+
+####### Modules ########
+mpath="/usr/lib/x86_64-linux-gnu/opensips/modules/"
+
+loadmodule "sl.so"
+loadmodule "tm.so"
+loadmodule "rr.so"
+loadmodule "sipmsgops.so"    # has_totag, is_present_hf
+loadmodule "rtpengine.so"
+loadmodule "proto_udp.so"    # транспорт UDP (в 3.6 — отдельный модуль)
+# TLS на внешней стороне (транки оператора). В OpenSIPS 3.6 TLS — связка
+# из трёх модулей: транспорт + менеджер сертификатов + SSL-бэкенд.
+loadmodule "proto_tls.so"     # TLS-транспорт
+loadmodule "tls_mgm.so"       # сертификаты/TLS-домены
+loadmodule "tls_openssl.so"   # SSL-бэкенд для tls_mgm
+
+####### Module params ########
+modparam("rr", "enable_double_rr", 1)
+
+# Демо-сертификаты: self-signed CA из ansible/files/tls, монтируются в
+# контейнер SUT через volumes таска (см. config.yml тестовой роли).
+# В проде: сертификаты из Vault/secret-хранилища на каждую ноду.
+# Синтаксис 3.6: TLS-домен объявляется по имени, параметры — с префиксом [имя].
+modparam("tls_mgm", "server_domain", "sbc_ext")
+modparam("tls_mgm", "certificate", "[sbc_ext]/tls-certs/sbc-cert.pem")
+modparam("tls_mgm", "private_key", "[sbc_ext]/tls-certs/sbc-key.pem")
+modparam("tls_mgm", "ca_list", "[sbc_ext]/tls-certs/ca-cert.pem")
+modparam("tls_mgm", "verify_cert", "[sbc_ext]0")   # демо: клиентские серты не проверяем
+
+# rtpengine на том же хосте (host-режим) — control-сокет ng.
+# Адрес и порт — rtpengine_control_ip / rtpengine_ng_port: база (127.0.0.1, как
+# на Linux-ноде в проде) в group_vars/all.yml, окружение test переопределяет
+# в vars/test_vars.yml (Docker Desktop на macOS проксирует loopback каждого
+# host-контейнера отдельно и ответ rtpengine не доходит до opensips).
+modparam("rtpengine", "rtpengine_sock", "udp:{{ rtpengine_control_ip }}:{{ rtpengine_ng_port }}")
+
+####### Routing ########
+route{
+    # Внутридиалоговые запросы (ACK/BYE/re-INVITE) — релеим. re-INVITE несёт
+    # новый SDP-офер: без rtpengine_manage() он уйдёт транзитом с прямым адресом
+    # пира и медиа пойдёт в обход rtpengine (мимо SBC)
+    if (has_totag()) {
+        if (loose_route()) {
+            if (is_method("INVITE")) {
+                # флаги как в проде: loop-protect против эхо-петель,
+                # replace-session-connection переписывает c=, ICE=remove
+                rtpengine_manage("replace-origin replace-session-connection ICE=remove RTP/AVP loop-protect");
+            }
+            route(RELAY);
+        } else {
+            sl_send_reply(404, "Not Here");
+        }
+        exit;
+    }
+
+    if (!is_method("INVITE")) {
+        sl_send_reply(405, "Method Not Allowed");
+        exit;
+    }
+
+    # Звонок от внутренней АТС на внешний транк
+    if ($src_ip == {{ demo_endpoints.internal_pbx.ip }}) {
+        if (!is_present_hf("X-gwid")) {
+            sl_send_reply(403, "Forbidden - no gwid");
+            exit;
+        }
+        rtpengine_manage("replace-origin direction=internal direction=external");
+        record_route();
+        $rd = "{{ demo_endpoints.external_trunk.ip }}"; $rp = "{{ demo_endpoints.external_trunk.port }}";
+        # Фиксируем транспорт исходной ноги: без этого OpenSIPS тянет протокол
+        # входящего запроса (при TLS-ветке релеил бы на АТС по tls и ловил
+        # 477 Send failed — транспорт исхода не выводится из назначения автоматически)
+        $du = "sip:{{ demo_endpoints.external_trunk.ip }}:{{ demo_endpoints.external_trunk.port }};transport=udp";
+        route(RELAY);
+        exit;
+    }
+
+    # Звонок от внешнего транка на внутреннюю АТС (входящее направление, incl. TLS)
+    if ($src_ip == {{ demo_endpoints.external_trunk.ip }}) {
+        rtpengine_manage("replace-origin direction=external direction=internal");
+        record_route();
+        $rd = "{{ demo_endpoints.internal_pbx.ip }}"; $rp = "{{ demo_endpoints.internal_pbx.port }}";
+        $du = "sip:{{ demo_endpoints.internal_pbx.ip }}:{{ demo_endpoints.internal_pbx.port }};transport=udp";
+        route(RELAY);
+        exit;
+    }
+
+    # Все остальные источники — отказ (негативный тест unauthorized)
+    sl_send_reply(403, "Forbidden");
+}
+
+route[RELAY] {
+    if (!t_relay()) {
+        sl_reply_error();
+    }
+    exit;
+}
+
+onreply_route {
+    # Ответ 2xx с SDP — rtpengine обязан обработать answer
+    if (is_method("INVITE")) {
+        rtpengine_manage("replace-origin");
+    }
+}

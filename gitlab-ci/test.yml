@@ -1,0 +1,30 @@
+# Тестовая джоба. Локально запускается через gitlab-ci-local (make ci).
+#
+# В проде отличия:
+#   tags: [voip-test-runner]            — раннер с доступом к тестовой ноде;
+#   image: registry.../ci-image — приватный registry;
+#   DEPLOY_DIR: /opt/voip-test   — путь на ноде (env переменной окружения);
+#   rules по $CI_PIPELINE_SOURCE и переменным подтверждения.
+#
+# DEPLOY_DIR здесь НЕ задаётся намеренно: путь выбирает плейбук
+# (в gitlab-ci-local это HOST_WORKSPACE/build — хостовый путь, без него
+# вложенный docker не смонтирует каталог тестов).
+test:
+  stage: test
+  image: drybushkin/voip-tests-ci:latest
+  variables:
+    # Тест всегда выполняется на тестовом стенде, независимо от ENV пайплайна
+    # (ENV на уровне пайплайна — целевое окружение только для стадии deploy)
+    ENV: test
+  script:
+    # Инвентарь тестового стенда: ansible/inventories/test/inventory.ini
+    # (test — localhost; dev/stage/prod — SSH-схема, используется стадией deploy)
+    - ansible-playbook -i ansible/inventories/$ENV/inventory.ini ansible/playbook.yml
+  artifacts:
+    when: always
+    paths:
+      - report.xml
+      - sipssert-logs.tar.gz   # логи + pcap прогона: диагностика красного pipeline из UI
+    expire_in: 1 week
+    reports:
+      junit: report.xml

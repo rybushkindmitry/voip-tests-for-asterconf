@@ -1,0 +1,416 @@
+---
+# Конфиг тестового набора sipssert: сети, образы по умолчанию, шаблоны задач.
+# РЕНДЕРИТСЯ ansible'ом (роль test, layout по каждому набору) из playbook-переменных:
+# те же значения, что и в defines.yml, но в config.yml всё подставляется на этапе
+# деплоя — sipssert получает готовый файл. Исключение делали раньше для
+# defines-переменных, сейчас единый рендер — проще отлаживать.
+# Демо-TLS: сертификаты ansible раскладывает в {{ deploy_dir }}/tls (хостовый
+# путь — иначе вложенный docker не смонтирует; ci_project_dir в gcl/GitLab —
+# это /builds, невидимый docker-демону).
+
+bridge_networks:
+  - name: internal_net
+    subnet: {{ demo_networks.internal_net.subnet }}
+    gateway: {{ demo_networks.internal_net.gateway }}
+  - name: external_net
+    subnet: {{ demo_networks.external_net.subnet }}
+    gateway: {{ demo_networks.external_net.gateway }}
+
+defaults:
+  opensips:
+    image: {{ demo_images.opensips }}
+    entrypoint:
+      - opensips
+      - -F
+    stop_timeout: 1
+  sipp:
+    image: {{ demo_images.sipp }}
+    entrypoint: sipp
+
+task_templates:
+  # rtpengine: БЕЗ network — host-режим, один IP с opensips (как в проде)
+  rtpengine_service:
+    type: generic
+    name: rtpengine_service
+    image: {{ demo_images.rtpengine }}
+    entrypoint:
+      - rtpengine
+      - --config-file=/etc/rtpengine/rtpengine.conf
+      - --foreground
+      - --log-stderr
+    config: rtpengine.conf
+    mount_point: /etc/rtpengine
+    daemon: true
+    stop_timeout: 1
+
+  # opensips: host-режим; для TLS-тестов монтируем демо-сертификаты
+  # (путь на хосте = путь в репозитории; в контейнере — как в opensips.cfg)
+  opensips:
+    type: opensips
+    name: opensips
+    config_file: opensips.cfg
+    volumes:
+      {{ deploy_dir }}/tls:
+        bind: /tls-certs
+        mode: ro
+
+  sipp_internal_pbx:
+    type: sipp
+    name: sipp_internal_pbx
+    network: internal_net
+    ip: {{ demo_endpoints.internal_pbx.ip }}
+    port: {{ demo_endpoints.internal_pbx.port }}
+    service: "{{ demo_endpoints.external_trunk.service }}"
+    proxy: "{{ sbc.internal_ip }}:{{ sbc.internal_port }}"
+    keys:
+      remote_ip: {{ sbc.internal_ip }}
+      remote_port: {{ sbc.internal_port }}
+      local_ip: {{ demo_endpoints.internal_pbx.ip }}
+      local_port: {{ demo_endpoints.internal_pbx.port }}
+      media_ip: {{ demo_endpoints.internal_pbx.ip }}
+      tel: {{ demo_endpoints.internal_pbx.tel }}
+      gwid: {{ demo_endpoints.internal_pbx.gwid }}
+      service: {{ demo_endpoints.external_trunk.service }}
+      host_ip: {{ demo_endpoints.internal_pbx.ip }}
+
+  sipp_external_trunk:
+    type: sipp
+    name: sipp_external_trunk
+    network: external_net
+    ip: {{ demo_endpoints.external_trunk.ip }}
+    port: {{ demo_endpoints.external_trunk.port }}
+    service: "{{ demo_endpoints.external_trunk.service }}"
+    proxy: "{{ sbc.external_ip }}:{{ sbc.external_port }}"
+    keys:
+      remote_ip: {{ sbc.external_ip }}
+      remote_port: {{ sbc.external_port }}
+      local_ip: {{ demo_endpoints.external_trunk.ip }}
+      local_port: {{ demo_endpoints.external_trunk.port }}
+      media_ip: {{ demo_endpoints.external_trunk.ip }}
+      tel: {{ demo_endpoints.external_trunk.tel }}
+      service: {{ demo_endpoints.external_trunk.service }}
+      host_ip: {{ demo_endpoints.external_trunk.ip }}
+
+  sipp_internal_hacker:
+    type: sipp
+    name: sipp_internal_hacker
+    network: internal_net
+    ip: {{ demo_endpoints.internal_hacker.ip }}
+    port: {{ demo_endpoints.internal_hacker.port }}
+    proxy: "{{ sbc.internal_ip }}:{{ sbc.internal_port }}"
+    keys:
+      remote_ip: {{ sbc.internal_ip }}
+      remote_port: {{ sbc.internal_port }}
+      local_ip: {{ demo_endpoints.internal_hacker.ip }}
+      local_port: {{ demo_endpoints.internal_hacker.port }}
+      media_ip: {{ demo_endpoints.internal_hacker.ip }}
+      tel: {{ demo_endpoints.internal_hacker.tel }}
+      host_ip: {{ demo_endpoints.internal_hacker.ip }}
+
+  # UAC: АТС с проверкой RTP (битовый паттерн, сверка эха)
+  sipp_uac_pbx_rtp:
+    type: generic
+    name: sipp_uac_pbx_rtp
+    image: {{ demo_images.sipp }}
+    entrypoint: sipp
+    network: internal_net
+    ip: {{ demo_endpoints.internal_pbx.ip }}
+    args:
+      - "{{ sbc.internal_ip }}:{{ sbc.internal_port }}"
+      - "-sf"
+      - /home/oinvite-i200-rtp-ibye.xml
+      - "-s"
+      - "{{ demo_endpoints.external_trunk.service }}"
+      - "-i"
+      - "{{ demo_endpoints.internal_pbx.ip }}"
+      - "-p"
+      - "{{ demo_endpoints.internal_pbx.port }}"
+      - "-mp"
+      - "{{ sipp_ports.media_port_uac }}"
+      - "-m"
+      - "1"
+      - "-key"
+      - "tel"
+      - "{{ demo_endpoints.internal_pbx.tel }}"
+      - "-key"
+      - "gwid"
+      - "{{ demo_endpoints.internal_pbx.gwid }}"
+    daemon: false
+
+  # UAS: транк с rtp_echo (эхо-отражение потока)
+  sipp_uas_trunk_rtp:
+    type: generic
+    name: sipp_uas_trunk_rtp
+    image: {{ demo_images.sipp }}
+    entrypoint: sipp
+    network: external_net
+    ip: {{ demo_endpoints.external_trunk.ip }}
+    args:
+      - "-sf"
+      - /home/iinvite-o200-rtp_echo-obye.xml
+      - "-i"
+      - "{{ demo_endpoints.external_trunk.ip }}"
+      - "-p"
+      - "{{ demo_endpoints.external_trunk.port }}"
+      - "-mp"
+      - "{{ sipp_ports.media_port_uas }}"
+      - "-m"
+      - "1"
+      - "-rtp_echo"
+      - "-s"
+      - "{{ demo_endpoints.external_trunk.service }}"
+    daemon: false
+
+  # UAS: внутренняя АТС с rtp_echo (эхо для TLS-тестов pjsua)
+  sipp_uas_pbx_rtp_echo:
+    type: generic
+    name: sipp_uas_pbx_rtp_echo
+    image: {{ demo_images.sipp }}
+    entrypoint: sipp
+    network: internal_net
+    ip: {{ demo_endpoints.internal_pbx.ip }}
+    args:
+      - "-sf"
+      - /home/iinvite_pbx-o200-rtp_echo-obye.xml
+      - "-i"
+      - "{{ demo_endpoints.internal_pbx.ip }}"
+      - "-p"
+      - "{{ demo_endpoints.internal_pbx.port }}"
+      - "-mp"
+      - "{{ sipp_ports.media_port_uas }}"
+      - "-m"
+      - "1"
+      - "-rtp_echo"
+      - "-s"
+      - "{{ demo_endpoints.external_trunk.service }}"
+    daemon: false
+
+  # ---- RTP-тесты звонков (входящие) и re-INVITE ----
+  # UAC: транк со стримом RTP (звонок ИЗ транка); BYE у АТС
+  sipp_uac_trunk_rtp:
+    type: generic
+    name: sipp_uac_trunk_rtp
+    image: {{ demo_images.sipp }}
+    entrypoint: sipp
+    network: external_net
+    ip: {{ demo_endpoints.external_trunk.ip }}
+    args:
+      - "{{ sbc.external_ip }}:{{ sbc.external_port }}"
+      - "-sf"
+      - /home/oinvite_from_trunk-i200-rtp-ibye.xml
+      - "-s"
+      - "{{ demo_endpoints.external_trunk.service }}"
+      - "-i"
+      - "{{ demo_endpoints.external_trunk.ip }}"
+      - "-p"
+      - "{{ demo_endpoints.external_trunk.port }}"
+      - "-mp"
+      - "{{ sipp_ports.media_port_uac }}"
+      - "-m"
+      - "1"
+      - "-key"
+      - "tel"
+      - "{{ demo_endpoints.external_trunk.tel }}"
+    daemon: false
+
+  # UAC: транк, после установки шлёт re-INVITE, затем RTP-паттерн (проверка
+  # что медиа ходит через rtpengine ПОСЛЕ пересогласования)
+  sipp_uac_trunk_rtp_reinvite:
+    type: generic
+    name: sipp_uac_trunk_rtp_reinvite
+    image: {{ demo_images.sipp }}
+    entrypoint: sipp
+    network: external_net
+    ip: {{ demo_endpoints.external_trunk.ip }}
+    args:
+      - "{{ sbc.external_ip }}:{{ sbc.external_port }}"
+      - "-sf"
+      - /home/oinvite_from_trunk-i200-rtp_reinvite-ibye.xml
+      - "-s"
+      - "{{ demo_endpoints.external_trunk.service }}"
+      - "-i"
+      - "{{ demo_endpoints.external_trunk.ip }}"
+      - "-p"
+      - "{{ demo_endpoints.external_trunk.port }}"
+      - "-mp"
+      - "{{ sipp_ports.media_port_uac }}"
+      - "-m"
+      - "1"
+      - "-timeout"
+      - "30"
+      - "-key"
+      - "tel"
+      - "{{ demo_endpoints.external_trunk.tel }}"
+    daemon: false
+
+  # UAC: транк, принимает re-INVITE ОТ АТС; ereg проверяет, что офер указывает
+  # на SBC (SBC IP в jinja-сценарии), затем сверяет RTP-паттерн
+  # UAC: АТС со стримом RTP; после установки шлёт re-INVITE, затем RTP-паттерн
+  sipp_uac_pbx_rtp_reinvite:
+    type: generic
+    name: sipp_uac_pbx_rtp_reinvite
+    image: {{ demo_images.sipp }}
+    entrypoint: sipp
+    network: internal_net
+    ip: {{ demo_endpoints.internal_pbx.ip }}
+    args:
+      - "{{ sbc.internal_ip }}:{{ sbc.internal_port }}"
+      - "-sf"
+      - /home/oinvite-i200-rtp_reinvite-ibye.xml
+      - "-s"
+      - "{{ demo_endpoints.external_trunk.service }}"
+      - "-i"
+      - "{{ demo_endpoints.internal_pbx.ip }}"
+      - "-p"
+      - "{{ demo_endpoints.internal_pbx.port }}"
+      - "-mp"
+      - "{{ sipp_ports.media_port_uac }}"
+      - "-m"
+      - "1"
+      - "-timeout"
+      - "30"
+      - "-key"
+      - "tel"
+      - "{{ demo_endpoints.internal_pbx.tel }}"
+      - "-key"
+      - "gwid"
+      - "{{ demo_endpoints.internal_pbx.gwid }}"
+    daemon: false
+
+  # UAC: АТС, принимает re-INVITE ОТ ТРАНКА; ereg проверяет якорение офера
+  # на SBC (SBC IP в jinja-сценарии), затем сверяет RTP-паттерн
+  # UAS: АТС с эхо-медиа + BYE от АТС (звонок ИЗ транка, простой).
+  # Позиционный proxy обязателен: сценарий шлёт BYE с Route из [remote_ip]
+  sipp_uas_pbx_rtp_bye:
+    type: generic
+    name: sipp_uas_pbx_rtp_bye
+    image: {{ demo_images.sipp }}
+    entrypoint: sipp
+    network: internal_net
+    ip: {{ demo_endpoints.internal_pbx.ip }}
+    args:
+      - "{{ sbc.internal_ip }}:{{ sbc.internal_port }}"
+      - "-sf"
+      - /home/iinvite_pbx-o200-rtp_echo-bye_from_uas.xml
+      - "-i"
+      - "{{ demo_endpoints.internal_pbx.ip }}"
+      - "-p"
+      - "{{ demo_endpoints.internal_pbx.port }}"
+      - "-mp"
+      - "{{ sipp_ports.media_port_uas }}"
+      - "-m"
+      - "1"
+      - "-rtp_echo"
+      - "-s"
+      - "{{ demo_endpoints.external_trunk.service }}"
+      - "-key"
+      - "tel"
+      - "{{ demo_endpoints.internal_pbx.tel }}"
+    daemon: false
+
+  # UAS: АТС с эхо-медиа, отвечает на re-INVITE (звонок ИЗ транка, re-INVITE от транка)
+  sipp_uas_pbx_rtp_reinvite:
+    type: generic
+    name: sipp_uas_pbx_rtp_reinvite
+    image: {{ demo_images.sipp }}
+    entrypoint: sipp
+    network: internal_net
+    ip: {{ demo_endpoints.internal_pbx.ip }}
+    args:
+      - "-sf"
+      - /home/iinvite_pbx-o200-rtp_echo_reinvite-obye.xml
+      - "-i"
+      - "{{ demo_endpoints.internal_pbx.ip }}"
+      - "-p"
+      - "{{ demo_endpoints.internal_pbx.port }}"
+      - "-mp"
+      - "{{ sipp_ports.media_port_uas }}"
+      - "-m"
+      - "1"
+      - "-timeout"
+      - "30"
+      - "-rtp_echo"
+      - "-s"
+      - "{{ demo_endpoints.external_trunk.service }}"
+    daemon: false
+
+  # UAS: АТС с эхо-медиа, сама шлёт re-INVITE (звонок ИЗ транка, re-INVITE от АТС).
+  # Позиционный proxy обязателен: Route в re-INVITE строится из [remote_ip]
+  # UAS: транк с эхо-медиа, отвечает на re-INVITE (звонок В транк, re-INVITE от АТС)
+  sipp_uas_trunk_rtp_reinvite:
+    type: generic
+    name: sipp_uas_trunk_rtp_reinvite
+    image: {{ demo_images.sipp }}
+    entrypoint: sipp
+    network: external_net
+    ip: {{ demo_endpoints.external_trunk.ip }}
+    args:
+      - "-sf"
+      - /home/iinvite-o200-rtp_echo_reinvite-obye.xml
+      - "-i"
+      - "{{ demo_endpoints.external_trunk.ip }}"
+      - "-p"
+      - "{{ demo_endpoints.external_trunk.port }}"
+      - "-mp"
+      - "{{ sipp_ports.media_port_uas }}"
+      - "-m"
+      - "1"
+      - "-timeout"
+      - "30"
+      - "-rtp_echo"
+      - "-s"
+      - "{{ demo_endpoints.external_trunk.service }}"
+    daemon: false
+
+  # UAS: транк с эхо-медиа, сам шлёт re-INVITE (звонок В транк, re-INVITE от транка).
+  # Позиционный proxy обязателен: Route в re-INVITE строится из [remote_ip]
+  # pjsua-test (github.com/rybushkindmitry/pjsua-for-sipssert):
+  # UAC-транк по TLS (TLS client — как оператор, подключающийся к SBC).
+  # Роли TLS и SIP развязаны — то, чего не умеет SIPp.
+  pjsua_trunk_tls:
+    type: generic
+    name: pjsua_trunk_tls
+    image: {{ demo_images.pjsua }}
+    network: external_net
+    ip: {{ demo_endpoints.external_trunk.ip }}
+    volumes:
+      {{ deploy_dir }}/tls:
+        bind: /certs
+        mode: ro
+    args:
+      - "--mode=uac"
+      - "--transport=tls"
+      - "--proxy={{ sbc.external_ip }}:{{ sbc.tls_port }}"
+      - "--port={{ demo_endpoints.external_trunk.port }}"
+      - "--rtp-port=16200"
+      - "--tls-ca-file=/certs/ca-cert.pem"
+      - "--expect-header=Record-Route"
+      - "--duration=3"
+      - "--bye=uac"
+    daemon: false
+
+  # pjsua-test: то же + обязательный SDES-SRTP (rtpengine терминирует
+  # SRTP снаружи, внутрь идёт RTP — полный продовый кейс)
+  pjsua_trunk_tls_srtp:
+    type: generic
+    name: pjsua_trunk_tls_srtp
+    image: {{ demo_images.pjsua }}
+    network: external_net
+    ip: {{ demo_endpoints.external_trunk.ip }}
+    volumes:
+      {{ deploy_dir }}/tls:
+        bind: /certs
+        mode: ro
+    args:
+      - "--mode=uac"
+      - "--transport=tls"
+      - "--proxy={{ sbc.external_ip }}:{{ sbc.tls_port }}"
+      - "--port={{ demo_endpoints.external_trunk.port }}"
+      - "--rtp-port=16200"
+      - "--tls-ca-file=/certs/ca-cert.pem"
+      - "--expect-header=Record-Route"
+      - "--srtp=mandatory"
+      - "--srtp-secure=0"
+      - "--duration=3"
+      - "--bye=uac"
+    daemon: false

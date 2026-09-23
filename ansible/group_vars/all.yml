@@ -1,0 +1,47 @@
+---
+# Базовые значения SUT и тестового стенда — общие для всех окружений.
+# Окружение выбирается переменной ENV (test/dev/stage/prod, по умолчанию test):
+# плейбук подключает ansible/vars/<env>_vars.yml через include_vars — приоритет
+# выше, чем у этого файла, поэтому окружение переопределяет значения точечно.
+# В проде: те же vars/<env>_vars.yml + секреты из Vault, адреса из dig-lookup'ов VIP.
+
+# Bridge-сети стенда sipssert (одинаковы на всех окружениях)
+demo_networks:
+  internal_net:
+    subnet: 192.168.51.0/24
+    gateway: 192.168.51.1
+  external_net:
+    subnet: 198.51.100.0/24
+    gateway: 198.51.100.1
+
+# SBC: opensips + rtpengine совмещены на одном хосте (host-режим, как в проде)
+sbc:
+  internal_ip: 192.168.51.1
+  external_ip: 198.51.100.1
+  internal_port: 5060
+  external_port: 5060
+  # TLS-сокет на внешней стороне (транки оператора с шифрованием)
+  tls_port: 5061
+
+# ng-control от opensips к rtpengine. По умолчанию 127.0.0.1 — как на
+# Linux-ноде в проде; окружение test (локальный docker на macOS) переопределяет
+# — см. vars/test_vars.yml.
+rtpengine_control_ip: 127.0.0.1
+rtpengine_ng_port: 2223
+
+# SIP-эндпоинты стенда (одинаковы на всех окружениях)
+demo_endpoints:
+  internal_pbx:
+    ip: 192.168.51.5
+    port: 5060
+    tel: "79851112233"
+    gwid: TEST
+  internal_hacker:
+    ip: 192.168.51.100
+    port: 5060
+    tel: "79851112233"
+  external_trunk:
+    ip: 198.51.100.5
+    port: 5081
+    service: "74950000000"
+    tel: "79851112233"

@@ -1,0 +1,17 @@
+---
+# Run-конфиг sipssert: список наборов тестов.
+# broken_check — заведомо падающий набор для демонстрации красного pipeline;
+# исключается переменной SKIP_KNOWN_FAILING=enable (в проде аналогично SKIP_TESTS).
+logging:
+  controller:
+    level: DEBUG
+    console: false
+tests:
+  - config_check
+  - call_to_trunk
+  - call_from_trunk
+  - unauthorized
+  - tls_from_trunk
+{% if not skip_known_failing %}
+  - broken_check
+{% endif %}

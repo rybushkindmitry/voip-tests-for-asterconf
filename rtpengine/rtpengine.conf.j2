@@ -1,0 +1,13 @@
+[rtpengine]
+# Jinja-шаблон: рендерится ansible'ом (роль gateway) из ansible/group_vars/all.yml.
+# Те же IP, что у opensips — SBC и rtpengine совмещены на одном хосте (как в проде).
+# internal/external — имена сторон, на них ссылается direction= в opensips.cfg.
+interface = internal/{{ sbc.internal_ip }};external/{{ sbc.external_ip }}
+
+# ng-control: opensips шлёт команды с того же хоста.
+# В проде (Linux-нода) — 127.0.0.1; в демо — адрес внутренней стороны SBC
+# (см. комментарий в opensips.cfg.j2 про Docker Desktop).
+listen-ng = {{ rtpengine_control_ip }}:{{ rtpengine_ng_port }}
+
+timeout = 60
+delete-delay = 0

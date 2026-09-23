@@ -1,0 +1,8 @@
+---
+# Окружение stage — предпродовый стенд: конфигурация ноды максимально близка
+# к продовой (те же пути, версии образов), трафик — синтетический.
+# rtpengine_control_ip наследуется из ansible/group_vars/all.yml (127.0.0.1).
+deploy_dir: /opt/voip-test-stage
+sipp_ports:
+  media_port_uac: 32500
+  media_port_uas: 32600
